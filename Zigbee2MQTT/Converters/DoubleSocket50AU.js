@@ -125,25 +125,23 @@ const definition = {
 
         // Bind necessary clusters for both endpoints
         await reporting.bind(endpoint1, coordinatorEndpoint, ['genIdentify', 'genOnOff', 'haElectricalMeasurement', 'genBasic']);
-        await reporting.onOff(endpoint1);
+        await reporting.onOff(endpoint1, { min: 0, max: 60, change: 1 });
 
         await reporting.bind(endpoint2, coordinatorEndpoint, ['genIdentify', 'genOnOff', 'haElectricalMeasurement', 'genBasic']);
-        await reporting.onOff(endpoint2);
+        await reporting.onOff(endpoint2, { min: 0, max: 60, change: 1 });
 
-        // Read initial child lock states
+        // Enable reporting for child lock (deviceEnabled) attribute on both endpoints
         try {
-            const result1 = await endpoint1.read('genBasic', ['deviceEnabled']);
-            const result2 = await endpoint2.read('genBasic', ['deviceEnabled']);
-            console.log(`Initial child lock state for endpoint 1: ${result1.deviceEnabled}, endpoint 2: ${result2.deviceEnabled}`);
+            await reporting.deviceEnabled(endpoint1, { min: 0, max: 3600, change: 1 });
+            await reporting.deviceEnabled(endpoint2, { min: 0, max: 3600, change: 1 });
         } catch (error) {
-            console.error('Failed to read initial child lock states:', error);
+            console.error('Failed to set up child lock reporting:', error);
         }
 
         // Set default brightness
         try {
             const defaultBrightness = 50;
             await endpoint1.command('genLevelCtrl', 'moveToLevel', { level: defaultBrightness, transtime: 0 });
-            console.log(`Default brightness set to ${defaultBrightness}`);
         } catch (error) {
             console.error('Failed to set default brightness on endpoint 1:', error);
         }
@@ -153,11 +151,15 @@ const definition = {
             const stateLeft = await endpoint1.read('genOnOff', ['onOff']);
             const stateRight = await endpoint2.read('genOnOff', ['onOff']);
             const brightness = await endpoint1.read('genLevelCtrl', ['currentLevel']);
+            const childLockLeft = await endpoint1.read('genBasic', ['deviceEnabled']);
+            const childLockRight = await endpoint2.read('genBasic', ['deviceEnabled']);
             
             // Publish the initial state to MQTT
             device.publish('state_left', { state: stateLeft.onOff ? 'ON' : 'OFF' });
             device.publish('state_right', { state: stateRight.onOff ? 'ON' : 'OFF' });
             device.publish('brightness', { brightness: brightness.currentLevel });
+            device.publish('socket_left_child_lock', { state: childLockLeft.deviceEnabled === 1 ? 'UNLOCKED' : 'LOCKED' });
+            device.publish('socket_right_child_lock', { state: childLockRight.deviceEnabled === 1 ? 'UNLOCKED' : 'LOCKED' });
         } catch (error) {
             console.error('Failed to read state or brightness after configuration:', error);
         }
