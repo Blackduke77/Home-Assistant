@@ -32,6 +32,30 @@ const fzChildLock = {
     },
 };
 
+// Custom fromZigbee converter for device metadata and brightness
+const fzDeviceMetadata = {
+    cluster: 'genBasic',
+    type: ['attributeReport', 'readResponse'],
+    convert: (model, msg, publish, options, meta) => {
+        const payload = {
+            brightness: msg.data['currentLevel'],
+            linkquality: msg.linkquality,
+            ieeeAddr: msg.device.ieeeAddr,
+            manufacturerID: msg.device.manufacturerID,
+            manufacturerName: msg.device.manufacturerName,
+            model: msg.device.modelID,
+            hardwareVersion: msg.device.hardwareVersion,
+            applicationVersion: msg.device.applicationVersion,
+            stackVersion: msg.device.stackVersion,
+            zclVersion: msg.device.zclVersion,
+            powerSource: msg.device.powerSource,
+            networkAddress: msg.device.networkAddress,
+        };
+        
+        return payload;
+    },
+};
+
 // Custom toZigbee converter for child lock (with manual refresh support)
 const tzChildLock = {
     key: ['socket_left_child_lock', 'socket_right_child_lock'],
@@ -95,7 +119,7 @@ const definition = {
     model: 'AU-A1ZBDSS',
     vendor: 'Aurora Lighting',
     description: 'Double smart socket UK',
-    fromZigbee: [fz.identify, fz.on_off, fz.electrical_measurement, fzChildLock, fzBrightness],
+    fromZigbee: [fz.identify, fzDeviceMetadata, fz.on_off, fz.electrical_measurement, fzChildLock, fzBrightness],
     toZigbee: [tz.on_off, tzChildLock, tzLocal.backlight_brightness],
     exposes: [
         e.switch().withEndpoint('left'),
@@ -153,13 +177,26 @@ const definition = {
             const brightness = await endpoint1.read('genLevelCtrl', ['currentLevel']);
             const childLockLeft = await endpoint1.read('genBasic', ['deviceEnabled']);
             const childLockRight = await endpoint2.read('genBasic', ['deviceEnabled']);
-            
-            // Publish the initial state to MQTT
+            const metadata = await endpoint1.read('genBasic', [
+                'manufacturerName', 'modelId', 'applicationVersion', 'stackVersion', 'zclVersion', 'hardwareVersion'
+            ]);
+
             device.publish('state_left', { state: stateLeft.onOff ? 'ON' : 'OFF' });
             device.publish('state_right', { state: stateRight.onOff ? 'ON' : 'OFF' });
             device.publish('brightness', { brightness: brightness.currentLevel });
             device.publish('socket_left_child_lock', { state: childLockLeft.deviceEnabled === 1 ? 'UNLOCKED' : 'LOCKED' });
             device.publish('socket_right_child_lock', { state: childLockRight.deviceEnabled === 1 ? 'UNLOCKED' : 'LOCKED' });
+            
+            // Publish metadata to MQTT
+            device.publish('device', {
+                manufacturerName: metadata.manufacturerName,
+                model: metadata.modelId,
+                applicationVersion: metadata.applicationVersion,
+                stackVersion: metadata.stackVersion,
+                zclVersion: metadata.zclVersion,
+                hardwareVersion: metadata.hardwareVersion,
+                ieeeAddr: device.ieeeAddr,
+            });
         } catch (error) {
             console.error('Failed to read state or brightness after configuration:', error);
         }
