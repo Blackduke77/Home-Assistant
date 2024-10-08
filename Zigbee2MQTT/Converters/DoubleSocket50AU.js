@@ -32,30 +32,6 @@ const fzChildLock = {
     },
 };
 
-// Custom fromZigbee converter for device metadata and brightness
-const fzDeviceMetadata = {
-    cluster: 'genBasic',
-    type: ['attributeReport', 'readResponse'],
-    convert: (model, msg, publish, options, meta) => {
-        const payload = {
-            brightness: msg.data['currentLevel'],
-            linkquality: msg.linkquality,
-            ieeeAddr: msg.device.ieeeAddr,
-            manufacturerID: msg.device.manufacturerID,
-            manufacturerName: msg.device.manufacturerName,
-            model: msg.device.modelID,
-            hardwareVersion: msg.device.hardwareVersion,
-            applicationVersion: msg.device.applicationVersion,
-            stackVersion: msg.device.stackVersion,
-            zclVersion: msg.device.zclVersion,
-            powerSource: msg.device.powerSource,
-            networkAddress: msg.device.networkAddress,
-        };
-        
-        return payload;
-    },
-};
-
 // Custom toZigbee converter for child lock (with manual refresh support)
 const tzChildLock = {
     key: ['socket_left_child_lock', 'socket_right_child_lock'],
@@ -119,7 +95,7 @@ const definition = {
     model: 'AU-A1ZBDSS',
     vendor: 'Aurora Lighting',
     description: 'Double smart socket UK',
-    fromZigbee: [fz.identify, fzDeviceMetadata, fz.on_off, fz.electrical_measurement, fzChildLock, fzBrightness],
+    fromZigbee: [fz.identify, fz.on_off, fz.electrical_measurement, fzChildLock, fzBrightness],
     toZigbee: [tz.on_off, tzChildLock, tzLocal.backlight_brightness],
     exposes: [
         e.switch().withEndpoint('left'),
@@ -142,65 +118,63 @@ const definition = {
         return { 'left': 1, 'right': 2 };
     },
 
-    // Device configuration to set up reporting and initial read
-    configure: async (device, coordinatorEndpoint) => {
-        const endpoint1 = device.getEndpoint(1);
-        const endpoint2 = device.getEndpoint(2);
+	// Device configuration to set up reporting and initial read
+	configure: async (device, coordinatorEndpoint) => {
+		const endpoint1 = device.getEndpoint(1);
+		const endpoint2 = device.getEndpoint(2);
 
-        // Bind necessary clusters for both endpoints
-        await reporting.bind(endpoint1, coordinatorEndpoint, ['genIdentify', 'genOnOff', 'haElectricalMeasurement', 'genBasic']);
-        await reporting.onOff(endpoint1, { min: 0, max: 60, change: 1 });
+		// Bind necessary clusters for both endpoints
+		await reporting.bind(endpoint1, coordinatorEndpoint, ['genIdentify', 'genOnOff', 'haElectricalMeasurement', 'genBasic']);
+		await reporting.bind(endpoint2, coordinatorEndpoint, ['genIdentify', 'genOnOff', 'haElectricalMeasurement', 'genBasic']);
 
-        await reporting.bind(endpoint2, coordinatorEndpoint, ['genIdentify', 'genOnOff', 'haElectricalMeasurement', 'genBasic']);
-        await reporting.onOff(endpoint2, { min: 0, max: 60, change: 1 });
+		// Configure On/Off state reporting
+		await reporting.onOff(endpoint1, { min: 60, max: 600, change: 1 });
+		await reporting.onOff(endpoint2, { min: 60, max: 600, change: 1 });
 
-        // Enable reporting for child lock (deviceEnabled) attribute on both endpoints
-        try {
-            await reporting.deviceEnabled(endpoint1, { min: 0, max: 3600, change: 1 });
-            await reporting.deviceEnabled(endpoint2, { min: 0, max: 3600, change: 1 });
-        } catch (error) {
-            console.error('Failed to set up child lock reporting:', error);
-        }
+		// Configure power monitoring reporting to reduce chatter (for endpoint1)
+		await reporting.activePower(endpoint1, { min: 60, max: 600, change: 10 });  // Report every 1-10 minutes or if power changes by 10 watts
 
-        // Set default brightness
-        try {
-            const defaultBrightness = 50;
-            await endpoint1.command('genLevelCtrl', 'moveToLevel', { level: defaultBrightness, transtime: 0 });
-        } catch (error) {
-            console.error('Failed to set default brightness on endpoint 1:', error);
-        }
+		// Configure power monitoring reporting to reduce chatter (for endpoint2)
+		await reporting.activePower(endpoint2, { min: 60, max: 600, change: 10 });
 
-        // Force immediate state read after configuration
-        try {
-            const stateLeft = await endpoint1.read('genOnOff', ['onOff']);
-            const stateRight = await endpoint2.read('genOnOff', ['onOff']);
-            const brightness = await endpoint1.read('genLevelCtrl', ['currentLevel']);
-            const childLockLeft = await endpoint1.read('genBasic', ['deviceEnabled']);
-            const childLockRight = await endpoint2.read('genBasic', ['deviceEnabled']);
-            const metadata = await endpoint1.read('genBasic', [
-                'manufacturerName', 'modelId', 'applicationVersion', 'stackVersion', 'zclVersion', 'hardwareVersion'
-            ]);
+		// Enable reporting for child lock (deviceEnabled) attribute on both endpoints
+		try {
+			await reporting.deviceEnabled(endpoint1, { min: 60, max: 600, change: 1 });
+			await reporting.deviceEnabled(endpoint2, { min: 60, max: 600, change: 1 });
+		} catch (error) {
+			console.error('Failed to set up child lock reporting:', error);
+		}
 
-            device.publish('state_left', { state: stateLeft.onOff ? 'ON' : 'OFF' });
-            device.publish('state_right', { state: stateRight.onOff ? 'ON' : 'OFF' });
-            device.publish('brightness', { brightness: brightness.currentLevel });
-            device.publish('socket_left_child_lock', { state: childLockLeft.deviceEnabled === 1 ? 'UNLOCKED' : 'LOCKED' });
-            device.publish('socket_right_child_lock', { state: childLockRight.deviceEnabled === 1 ? 'UNLOCKED' : 'LOCKED' });
-            
-            // Publish metadata to MQTT
-            device.publish('device', {
-                manufacturerName: metadata.manufacturerName,
-                model: metadata.modelId,
-                applicationVersion: metadata.applicationVersion,
-                stackVersion: metadata.stackVersion,
-                zclVersion: metadata.zclVersion,
-                hardwareVersion: metadata.hardwareVersion,
-                ieeeAddr: device.ieeeAddr,
-            });
-        } catch (error) {
-            console.error('Failed to read state or brightness after configuration:', error);
-        }
-    }
+		// Set default brightness for endpoint 1
+		try {
+			const defaultBrightness = 20;
+			await endpoint1.command('genLevelCtrl', 'moveToLevel', { level: defaultBrightness, transtime: 0 });
+		} catch (error) {
+			console.error('Failed to set default brightness on endpoint 1:', error);
+		}
+
+		// Ensure the device is ready for initial reads
+		await new Promise(resolve => setTimeout(resolve, 2000)); // 1-second delay to ensure configuration is complete
+
+		// Force initial state read after configuration to synchronize states
+		try {
+			const stateLeft = await endpoint1.read('genOnOff', ['onOff']);
+			const stateRight = await endpoint2.read('genOnOff', ['onOff']);
+			const brightness = await endpoint1.read('genLevelCtrl', ['currentLevel']);
+			const childLockLeft = await endpoint1.read('genBasic', ['deviceEnabled']);
+			const childLockRight = await endpoint2.read('genBasic', ['deviceEnabled']);
+
+			// Publish the initial state to MQTT
+			device.publish('state_left', { state: stateLeft.onOff ? 'ON' : 'OFF' });
+			device.publish('state_right', { state: stateRight.onOff ? 'ON' : 'OFF' });
+			device.publish('brightness', { brightness: brightness.currentLevel });
+			device.publish('socket_left_child_lock', { state: childLockLeft.deviceEnabled === 1 ? 'UNLOCKED' : 'LOCKED' });
+			device.publish('socket_right_child_lock', { state: childLockRight.deviceEnabled === 1 ? 'UNLOCKED' : 'LOCKED' });
+		} catch (error) {
+			console.error('Failed to read state or brightness after configuration:', error);
+		}
+	}
+
 };
 
 module.exports = definition;
