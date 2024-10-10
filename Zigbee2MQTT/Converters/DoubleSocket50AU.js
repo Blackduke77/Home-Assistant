@@ -137,17 +137,10 @@ const definition = {
 		// Configure power monitoring reporting to reduce chatter (for endpoint2)
 		await reporting.activePower(endpoint2, { min: 60, max: 600, change: 10 });
 
-		// Enable reporting for child lock (deviceEnabled) attribute on both endpoints
-		try {
-			await reporting.deviceEnabled(endpoint1, { min: 60, max: 600, change: 1 });
-			await reporting.deviceEnabled(endpoint2, { min: 60, max: 600, change: 1 });
-		} catch (error) {
-			console.error('Failed to set up child lock reporting:', error);
-		}
 
 		// Set default brightness for endpoint 1
 		try {
-			const defaultBrightness = 20;
+			const defaultBrightness = 30;
 			await endpoint1.command('genLevelCtrl', 'moveToLevel', { level: defaultBrightness, transtime: 0 });
 		} catch (error) {
 			console.error('Failed to set default brightness on endpoint 1:', error);
