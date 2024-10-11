@@ -98,10 +98,10 @@ const definition = {
     fromZigbee: [fz.identify, fz.on_off, fz.electrical_measurement, fzChildLock, fzBrightness],
     toZigbee: [tz.on_off, tzChildLock, tzLocal.backlight_brightness],
     exposes: [
-        e.switch().withEndpoint('left'),
-        e.switch().withEndpoint('right'),
-        e.power().withEndpoint('left'),
-        e.power().withEndpoint('right'),
+        e.switch().withEndpoint('left').withDescription('Left Socket Switch'),
+        e.switch().withEndpoint('right').withDescription('Right Socket Switch'),
+        e.numeric('power_left', ea.STATE).withUnit('W').withDescription('Power usage of left socket'),
+        e.numeric('power_right', ea.STATE).withUnit('W').withDescription('Power usage of right socket'),
         e.numeric('brightness', ea.ALL)
             .withValueMin(0).withValueMax(254)
             .withDescription('Brightness of the backlight LED'),
@@ -118,55 +118,54 @@ const definition = {
         return { 'left': 1, 'right': 2 };
     },
 
-	// Device configuration to set up reporting and initial read
-	configure: async (device, coordinatorEndpoint) => {
-		const endpoint1 = device.getEndpoint(1);
-		const endpoint2 = device.getEndpoint(2);
+    // Device configuration to set up reporting and initial read
+    configure: async (device, coordinatorEndpoint) => {
+        const endpoint1 = device.getEndpoint(1);
+        const endpoint2 = device.getEndpoint(2);
 
-		// Bind necessary clusters for both endpoints
-		await reporting.bind(endpoint1, coordinatorEndpoint, ['genIdentify', 'genOnOff', 'haElectricalMeasurement', 'genBasic']);
-		await reporting.bind(endpoint2, coordinatorEndpoint, ['genIdentify', 'genOnOff', 'haElectricalMeasurement', 'genBasic']);
+        // Bind necessary clusters for both endpoints
+        await reporting.bind(endpoint1, coordinatorEndpoint, ['genIdentify', 'genOnOff', 'haElectricalMeasurement', 'genBasic']);
+        await reporting.bind(endpoint2, coordinatorEndpoint, ['genIdentify', 'genOnOff', 'haElectricalMeasurement', 'genBasic']);
 
-		// Configure On/Off state reporting
-		await reporting.onOff(endpoint1, { min: 60, max: 600, change: 1 });
-		await reporting.onOff(endpoint2, { min: 60, max: 600, change: 1 });
+        // Configure On/Off state reporting
+        await reporting.onOff(endpoint1, { min: 60, max: 600, change: 1 });
+        await reporting.onOff(endpoint2, { min: 60, max: 600, change: 1 });
 
-		// Configure power monitoring reporting to reduce chatter (for endpoint1)
-		await reporting.activePower(endpoint1, { min: 60, max: 600, change: 10 });  // Report every 1-10 minutes or if power changes by 10 watts
+        // Configure power monitoring reporting to reduce chatter (for endpoint1)
+        await reporting.activePower(endpoint1, { min: 60, max: 600, change: 10 });  // Report every 1-10 minutes or if power changes by 10 watts
 
-		// Configure power monitoring reporting to reduce chatter (for endpoint2)
-		await reporting.activePower(endpoint2, { min: 60, max: 600, change: 10 });
+        // Configure power monitoring reporting to reduce chatter (for endpoint2)
+        await reporting.activePower(endpoint2, { min: 60, max: 600, change: 10 });
 
+        // Set default brightness for endpoint 1
+        try {
+            const defaultBrightness = 30;
+            await endpoint1.command('genLevelCtrl', 'moveToLevel', { level: defaultBrightness, transtime: 0 });
+        } catch (error) {
+            console.error('Failed to set default brightness on endpoint 1:', error);
+        }
 
-		// Set default brightness for endpoint 1
-		try {
-			const defaultBrightness = 30;
-			await endpoint1.command('genLevelCtrl', 'moveToLevel', { level: defaultBrightness, transtime: 0 });
-		} catch (error) {
-			console.error('Failed to set default brightness on endpoint 1:', error);
-		}
+        // Ensure the device is ready for initial reads
+        await new Promise(resolve => setTimeout(resolve, 2000)); // 1-second delay to ensure configuration is complete
 
-		// Ensure the device is ready for initial reads
-		await new Promise(resolve => setTimeout(resolve, 2000)); // 1-second delay to ensure configuration is complete
+        // Force initial state read after configuration to synchronize states
+        try {
+            const stateLeft = await endpoint1.read('genOnOff', ['onOff']);
+            const stateRight = await endpoint2.read('genOnOff', ['onOff']);
+            const brightness = await endpoint1.read('genLevelCtrl', ['currentLevel']);
+            const childLockLeft = await endpoint1.read('genBasic', ['deviceEnabled']);
+            const childLockRight = await endpoint2.read('genBasic', ['deviceEnabled']);
 
-		// Force initial state read after configuration to synchronize states
-		try {
-			const stateLeft = await endpoint1.read('genOnOff', ['onOff']);
-			const stateRight = await endpoint2.read('genOnOff', ['onOff']);
-			const brightness = await endpoint1.read('genLevelCtrl', ['currentLevel']);
-			const childLockLeft = await endpoint1.read('genBasic', ['deviceEnabled']);
-			const childLockRight = await endpoint2.read('genBasic', ['deviceEnabled']);
-
-			// Publish the initial state to MQTT
-			device.publish('state_left', { state: stateLeft.onOff ? 'ON' : 'OFF' });
-			device.publish('state_right', { state: stateRight.onOff ? 'ON' : 'OFF' });
-			device.publish('brightness', { brightness: brightness.currentLevel });
-			device.publish('socket_left_child_lock', { state: childLockLeft.deviceEnabled === 1 ? 'UNLOCKED' : 'LOCKED' });
-			device.publish('socket_right_child_lock', { state: childLockRight.deviceEnabled === 1 ? 'UNLOCKED' : 'LOCKED' });
-		} catch (error) {
-			console.error('Failed to read state or brightness after configuration:', error);
-		}
-	}
+            // Publish the initial state to MQTT
+            device.publish('state_left', { state: stateLeft.onOff ? 'ON' : 'OFF' });
+            device.publish('state_right', { state: stateRight.onOff ? 'ON' : 'OFF' });
+            device.publish('brightness', { brightness: brightness.currentLevel });
+            device.publish('socket_left_child_lock', { state: childLockLeft.deviceEnabled === 1 ? 'UNLOCKED' : 'LOCKED' });
+            device.publish('socket_right_child_lock', { state: childLockRight.deviceEnabled === 1 ? 'UNLOCKED' : 'LOCKED' });
+        } catch (error) {
+            console.error('Failed to read state or brightness after configuration:', error);
+        }
+    }
 
 };
 
