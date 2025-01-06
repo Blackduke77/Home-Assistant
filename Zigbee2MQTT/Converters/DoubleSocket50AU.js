@@ -128,18 +128,18 @@ const definition = {
         await reporting.bind(endpoint2, coordinatorEndpoint, ['genIdentify', 'genOnOff', 'haElectricalMeasurement', 'genBasic']);
 
         // Configure On/Off state reporting
-        await reporting.onOff(endpoint1, { min: 60, max: 600, change: 1 });
-        await reporting.onOff(endpoint2, { min: 60, max: 600, change: 1 });
+        await reporting.onOff(endpoint1, { min: 0, max: 3600, change: 0 });
+        await reporting.onOff(endpoint2, { min: 0, max: 3600, change: 0 });
 
         // Configure power monitoring reporting to reduce chatter (for endpoint1)
-        await reporting.activePower(endpoint1, { min: 60, max: 600, change: 10 });  // Report every 1-10 minutes or if power changes by 10 watts
+        await reporting.activePower(endpoint1, { min: 0, max: 600, change: 1 });  // Report every 0-10 minutes or if power changes by 1 watts
 
         // Configure power monitoring reporting to reduce chatter (for endpoint2)
-        await reporting.activePower(endpoint2, { min: 60, max: 600, change: 10 });
+        await reporting.activePower(endpoint2, { min: 0, max: 600, change: 1 });
 
         // Set default brightness for endpoint 1
         try {
-            const defaultBrightness = 30;
+            const defaultBrightness = 50;
             await endpoint1.command('genLevelCtrl', 'moveToLevel', { level: defaultBrightness, transtime: 0 });
         } catch (error) {
             console.error('Failed to set default brightness on endpoint 1:', error);
